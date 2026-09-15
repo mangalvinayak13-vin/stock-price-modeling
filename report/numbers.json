@@ -1,0 +1,118 @@
+{
+  "ticker": "AAPL",
+  "history_years": 30,
+  "history_start": "1996-09-16",
+  "history_end": "2026-09-14",
+  "n_obs": 7546,
+  "S0": 333.0799865722656,
+  "risk_free_rate": 0.03934999942779541,
+  "dividend_yield": 0.0032424642728473645,
+  "gbm_mu": 0.34270859271459453,
+  "gbm_sigma": 0.4218885551236331,
+  "bs_parity_lhs": 3.534863098873714,
+  "bs_parity_rhs": 3.534863098873714,
+  "bs_iv_roundtrip_input_sigma": 0.4218885551236331,
+  "bs_iv_roundtrip_recovered": 0.4218885551236329,
+  "heston_5y": {
+    "kappa": 12.410183139982056,
+    "theta": 0.08060165969133994,
+    "xi": 1.414412857520775,
+    "rho": -0.38125651001250416,
+    "v0": 0.053622427830295645,
+    "feller_satisfied": "False",
+    "feller_slack": -1.015208007881796e-06
+  },
+  "heston_30y": {
+    "kappa": 14.019355251175618,
+    "theta": 0.2386102903899481,
+    "xi": 2.586581275360425,
+    "rho": 0.027223871749630566,
+    "v0": 0.053622427830297775,
+    "feller_satisfied": "False",
+    "feller_slack": -7.783891944601606e-05
+  },
+  "double_heston_5y": {
+    "kappa1": 12.410181345745597,
+    "theta1": 0.08060165968955742,
+    "xi1": 1.4144127552585142,
+    "rho1": -0.3812565077703212,
+    "v1_0": 0.05362242783028191,
+    "kappa2": 2.0309127155361484e-07,
+    "theta2": 2.0647316601425525e-14,
+    "xi2": 2.376737413637837e-09,
+    "v2_0": 1.3736184200340516e-14,
+    "feller_satisfied": "False",
+    "theta2_share": 2.561649062928075e-13
+  },
+  "cf_vs_mc": {
+    "cf_price": 24.556189458240794,
+    "mc_price": 24.61159846795219,
+    "mc_stderr": 0.11921714717005907,
+    "K": 339.74158630371096,
+    "T": 0.5
+  },
+  "kupiec": {
+    "n_windows": 24,
+    "n_trials_total": 6048,
+    "target_breach_rate": 0.050000000000000044,
+    "gbm": {
+      "breaches": 227,
+      "breach_rate": 0.037533068783068786,
+      "LR_statistic": 21.57769590054977,
+      "p_value": 3.3978030555308674e-06,
+      "rejected_at_5pct": "True"
+    },
+    "heston": {
+      "breaches": 416,
+      "breach_rate": 0.06878306878306878,
+      "LR_statistic": 40.41461093459475,
+      "p_value": 2.0539931481094395e-10,
+      "rejected_at_5pct": "True"
+    },
+    "double_heston": {
+      "breaches": 418,
+      "breach_rate": 0.06911375661375661,
+      "LR_statistic": 41.78053862459274,
+      "p_value": 1.0211477933458962e-10,
+      "rejected_at_5pct": "True"
+    }
+  },
+  "comparison_table": [
+    {
+      "model": "GBM",
+      "vol_RMSE_overall": 0.14453660287541215,
+      "vol_MAE_overall": 0.11513887440340786,
+      "vol_bias_overall": 0.07146931060394962,
+      "vol_RMSE_calm": 0.09646592128451892,
+      "vol_RMSE_turbulent": 0.18021094631641607,
+      "VaR_breach_rate": 0.037533068783068786,
+      "VaR_target_rate": 0.050000000000000044,
+      "kupiec_p_value": 3.3978030555308674e-06,
+      "kupiec_rejected": true
+    },
+    {
+      "model": "Heston",
+      "vol_RMSE_overall": 0.17810709894754512,
+      "vol_MAE_overall": 0.13816448353450386,
+      "vol_bias_overall": 0.09628932579738596,
+      "vol_RMSE_calm": 0.10169890505092036,
+      "vol_RMSE_turbulent": 0.23043786603435018,
+      "VaR_breach_rate": 0.06878306878306878,
+      "VaR_target_rate": 0.050000000000000044,
+      "kupiec_p_value": 2.0539931481094395e-10,
+      "kupiec_rejected": true
+    },
+    {
+      "model": "Double Heston",
+      "vol_RMSE_overall": 0.17690727015026905,
+      "vol_MAE_overall": 0.13528499969772637,
+      "vol_bias_overall": 0.09340984526329249,
+      "vol_RMSE_calm": 0.09593930108929499,
+      "vol_RMSE_turbulent": 0.23105846656320161,
+      "VaR_breach_rate": 0.06911375661375661,
+      "VaR_target_rate": 0.050000000000000044,
+      "kupiec_p_value": 1.0211477933458962e-10,
+      "kupiec_rejected": true
+    }
+  ]
+}
