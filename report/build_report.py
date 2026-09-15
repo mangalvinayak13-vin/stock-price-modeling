@@ -24,6 +24,9 @@ FIG = os.path.join(HERE, "figures")
 with open(os.path.join(HERE, "numbers.json")) as f:
     N = json.load(f)
 
+MULTI_TICKER_PATH = os.path.join(HERE, "multi_ticker_check.json")
+MULTI = json.load(open(MULTI_TICKER_PATH)) if os.path.exists(MULTI_TICKER_PATH) else None
+
 doc = Document()
 
 # --- base style ---
@@ -474,10 +477,26 @@ p(f"Double Heston, warm-started from the 5-year single-Heston fit above, was cal
   f"{N['double_heston_5y']['theta2_share']:.2e} -- essentially exactly zero. Figure 3 "
   f"shows why: the single- and double-Heston autocorrelation fits are visually "
   f"indistinguishable, both tracking the empirical decay reasonably (though imperfectly) "
-  f"with a single effective timescale. The calibration was checked on multiple tickers "
-  f"during development (AAPL, SPY, TSLA) and consistently found the same result: no "
-  f"genuine second timescale emerges in realized-variance persistence at this "
-  f"window/frequency. As discussed in Section 3.2, Double Heston's classic empirical "
+  f"with a single effective timescale.")
+
+if MULTI is not None:
+    p(f"To check this was not a one-ticker fluke, the same calibration (10-year window) "
+      f"was run on 5 tickers spanning different sectors and market-cap profiles: a "
+      f"broad index ETF (SPY), three mega-cap equities across different sectors (AAPL, "
+      f"MSFT, JPM), and a high-volatility growth stock (TSLA). The result was consistent "
+      f"across all five -- factor 2's share of total variance never exceeded 1%, and "
+      f"every ticker recovered the theoretically expected NEGATIVE leverage correlation:")
+    rows = []
+    for tk, d in MULTI.items():
+        rows.append([tk, f"{d['single_theta']**0.5:.1%}", f"{d['single_rho']:.3f}",
+                     f"{d['theta2_share']:.2e}"])
+    table_from_rows(["Ticker", "Long-run vol (single Heston)", "rho", "Factor 2 variance share (Double Heston)"], rows)
+    p("Table: Double Heston multi-ticker robustness check (10-year calibration window, "
+      "each ticker independent). Factor 2's share stays below 1% in every case, with "
+      "TSLA (the highest-vol, most growth/momentum-driven name tested) showing the "
+      "largest -- but still negligible -- second-factor contribution.", italic=True)
+
+p(f"As discussed in Section 3.2, Double Heston's classic empirical "
   f"motivation comes from fitting short- and long-dated OPTION-implied-volatility smiles "
   f"simultaneously -- a genuinely different target than the autocorrelation of realized "
   f"variance from spot returns, and this result should be read as evidence about that "
