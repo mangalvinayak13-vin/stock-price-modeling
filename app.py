@@ -169,10 +169,93 @@ log_returns = compute_log_returns(prices)
 r_rate, div_yield = cached_risk_free_and_dividend(ticker)
 
 
-tab_live, tab_gbm, tab_calib, tab_backtest, tab_pricing = st.tabs(
-    ["Live Price", "GBM Diagnostics", "Heston / Double Heston Calibration",
-     "30-Year Walk-Forward Backtest", "Theoretical Option Pricing"]
+tab_results, tab_live, tab_gbm, tab_calib, tab_backtest, tab_pricing = st.tabs(
+    ["Results (Start Here)", "Live Price", "GBM Diagnostics", "Heston / Double Heston Calibration",
+     "Detailed Backtest (Technical)", "Theoretical Option Pricing"]
 )
+
+
+# ---------------------------------------------------------------------------
+# Tab 0: Results -- the plain-language bottom line, loads automatically
+# ---------------------------------------------------------------------------
+
+with tab_results:
+    st.subheader(f"Bottom Line: Does a Fancier Model Actually Predict {ticker}'s Risk Better?")
+    st.caption(
+        "This is the actual answer the whole project is trying to give, computed fresh for "
+        "whichever ticker and history length you picked in the sidebar. Every number below is "
+        "from a strict, no-lookahead test on real historical data: each model only ever sees "
+        "data BEFORE the period it's being judged on -- no peeking ahead."
+    )
+
+    try:
+        with st.spinner(f"Testing GBM, Heston and Double Heston on {history_years} years of "
+                         f"{ticker} data, rolling forward 5-year windows at a time "
+                         f"(~20-30s the first time; instant after that)..."):
+            results_df, kupiec = cached_backtest(ticker, history_years, 5, 1, 1)
+
+        table = summary_table(results_df, kupiec)
+        best_row = table.loc[table["vol_RMSE_overall"].idxmin()]
+        best_model = best_row["model"]
+        passing_models = table[~table["kupiec_rejected"]]["model"].tolist()
+
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Best volatility forecaster", best_model)
+        col2.metric("Out-of-sample test periods", len(results_df))
+        col3.metric("Models that pass the risk-check", f"{len(passing_models)} of {len(table)}")
+
+        st.markdown("#### In plain English")
+        if best_model == "GBM":
+            st.markdown(
+                f"**The simplest model (constant volatility) actually predicted {ticker}'s "
+                f"future volatility best** among the three tested -- the fancier Heston and "
+                f"Double Heston models didn't pay off here. This is a genuine, honest finding, "
+                f"not a bug: extra model complexity doesn't automatically win, and testing that "
+                f"honestly (rather than assuming a fancy model is always better) is the whole "
+                f"point of this project."
+            )
+        else:
+            st.markdown(
+                f"**{best_model} predicted {ticker}'s future volatility most accurately** "
+                f"among the three models tested, beating the simpler alternatives."
+            )
+
+        if len(passing_models) == 0:
+            st.markdown(
+                "**None of the three models correctly forecast tail risk** across the full "
+                "test period (checked with the same formal statistical test bank regulators "
+                "use to validate risk models). This is a known, real-world phenomenon: models "
+                "like these, which assume shocks follow a smooth random pattern, tend to break "
+                "down during genuine crises (2008, COVID) where losses are more extreme than "
+                "the model expects."
+            )
+        else:
+            st.markdown(f"**{', '.join(passing_models)} passed** the formal tail-risk check; "
+                        f"the others didn't.")
+
+        st.markdown("#### The picture")
+        fig, ax = plt.subplots(figsize=(11, 4.5))
+        ax.plot(results_df["test_start_date"], results_df["realized_vol"], "k-o",
+                label="What actually happened", lw=2.5, ms=5)
+        ax.plot(results_df["test_start_date"], results_df["gbm_forecast_vol"], "b--s",
+                label="GBM predicted", alpha=0.8)
+        ax.plot(results_df["test_start_date"], results_df["heston_forecast_vol"], "r--^",
+                label="Heston predicted", alpha=0.8)
+        if "dh_forecast_vol" in results_df.columns:
+            ax.plot(results_df["test_start_date"], results_df["dh_forecast_vol"], "g--d",
+                    label="Double Heston predicted", alpha=0.8)
+        ax.set_ylabel("Annualized volatility")
+        ax.set_title(f"{ticker}: what each model predicted vs. what actually happened, year by year")
+        ax.legend()
+        fig.autofmt_xdate()
+        st.pyplot(fig)
+        plt.close(fig)
+
+        st.info("Want the full numbers behind this (RMSE tables, VaR breach rates, "
+                "statistical p-values)? See the **Detailed Backtest (Technical)** tab.")
+    except ValueError as e:
+        st.error(f"Not enough history to run the backtest: {e}. Try increasing "
+                 "'Years of history' in the sidebar.")
 
 
 # ---------------------------------------------------------------------------
@@ -320,16 +403,12 @@ with tab_calib:
 # ---------------------------------------------------------------------------
 
 with tab_backtest:
-    st.subheader("30-Year Walk-Forward Out-of-Sample Backtest")
+    st.subheader("30-Year Walk-Forward Out-of-Sample Backtest -- Full Technical Detail")
     st.caption(
-        "**In plain terms -- this is the actual result of the whole project.** Each model is "
-        "trained only on a 5-year window, then graded on the year immediately after, which it "
-        "never got to see in advance (no cheating). This repeats across 30 years, spanning the "
-        "dot-com crash, 2008, and COVID, and asks two questions: (1) how close was each model's "
-        "volatility forecast to what actually happened, and (2) if each model set a daily "
-        "\"this is the worst 1-in-20-day loss I'd expect\" threshold, did reality actually "
-        "breach it about 1 time in 20, as it should? Spoiler: the answers aren't flattering to "
-        "the fancier models, and that's reported honestly -- see README for full methodology."
+        "The **Results (Start Here)** tab gives the plain-language version of this with fixed "
+        "settings (5y calibration / 1y test). This tab is the same underlying test, but lets "
+        "you adjust the window sizes and shows the full numeric tables (RMSE, MAE, VaR breach "
+        "rates, Kupiec p-values) behind the headline finding."
     )
 
     calib_years = st.slider("Calibration window (years)", 2, 10, 5)
