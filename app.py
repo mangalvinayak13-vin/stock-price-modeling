@@ -111,6 +111,30 @@ st.sidebar.markdown(
 st.title("Stock Price Modeling: Brownian Motion -> Black-Scholes -> Heston -> Double Heston")
 st.caption(f"Ticker: **{ticker}** | History: **{history_years} years**")
 
+with st.container(border=True):
+    st.markdown(
+        "**What this app actually does, in plain terms:** every stock price model needs an "
+        "assumption about how \"jumpy\" (volatile) the stock is. The simplest models assume "
+        "that jumpiness never changes -- which is convenient but wrong, since real markets go "
+        "through calm and panicky periods. This app builds up four models of increasing "
+        "realism for that jumpiness, fits each one to this stock's real price history, and "
+        "then tests -- honestly, on 30 years of data, without cheating by peeking ahead -- "
+        "which one actually predicts risk better."
+    )
+    st.markdown(
+        "1. **GBM** -- the baseline: constant volatility (visibly wrong, see the *GBM "
+        "Diagnostics* tab)\n"
+        "2. **Black-Scholes** -- the classic option-pricing formula built on top of GBM\n"
+        "3. **Heston** -- lets volatility itself randomly rise and fall, pulled back toward "
+        "a \"normal\" level over time\n"
+        "4. **Double Heston** -- tests whether volatility actually has TWO different speeds "
+        "of swinging (a fast one and a slow one) rather than just one\n\n"
+        "**Where to look:** *Live Price* is just the raw data. *GBM Diagnostics* shows why "
+        "the simplest model fails. *Calibration* shows the fitted parameters for Heston/"
+        "Double Heston. **30-Year Backtest is the actual result** -- which model wins, tested "
+        "honestly. *Theoretical Option Pricing* is a bonus demo, not a trading tool."
+    )
+
 if not ticker:
     st.stop()
 
@@ -172,6 +196,11 @@ with tab_live:
 
 with tab_gbm:
     st.subheader("Geometric Brownian Motion: Fit and Diagnostics")
+    st.caption(
+        "**In plain terms:** this tab asks \"what if this stock's volatility were constant "
+        "forever?\" and simulates possible futures under that assumption. The bottom-right "
+        "chart below is the key evidence that this assumption is unrealistic."
+    )
 
     mu_hat, sigma_hat = estimate_gbm_params(log_returns)
     col1, col2, col3 = st.columns(3)
@@ -201,9 +230,14 @@ with tab_gbm:
 with tab_calib:
     st.subheader("Return-Based GMM Calibration")
     st.caption(
-        "Calibrated from the historical RETURN series alone (rolling realized variance and its "
-        "autocorrelation structure) -- no options data used. See README for the full methodology "
-        "and honest limitations of this approach."
+        "**In plain terms:** this tab estimates HOW volatile the stock really is (theta), how "
+        "quickly volatility snaps back to normal after a shock (kappa), how wildly volatility "
+        "itself swings (xi), and whether price drops coincide with volatility spikes (rho -- "
+        "usually negative for stocks). It then checks whether a SECOND, independent volatility "
+        "factor (Double Heston) actually helps -- often it doesn't, and that's an honest, "
+        "useful finding, not a failure. Calibrated from the historical RETURN series alone "
+        "(rolling realized variance and its autocorrelation structure) -- no options data used. "
+        "See README for the full methodology and honest limitations of this approach."
     )
 
     single = cached_heston_calibration(ticker, history_years)
@@ -267,9 +301,14 @@ with tab_calib:
 with tab_backtest:
     st.subheader("30-Year Walk-Forward Out-of-Sample Backtest")
     st.caption(
-        "Strict no-lookahead: each model is calibrated on a rolling window and judged only on "
-        "data immediately after, which it never saw during calibration. See README for full "
-        "methodology (Kupiec VaR coverage test, closed-form Heston variance forecast, etc.)."
+        "**In plain terms -- this is the actual result of the whole project.** Each model is "
+        "trained only on a 5-year window, then graded on the year immediately after, which it "
+        "never got to see in advance (no cheating). This repeats across 30 years, spanning the "
+        "dot-com crash, 2008, and COVID, and asks two questions: (1) how close was each model's "
+        "volatility forecast to what actually happened, and (2) if each model set a daily "
+        "\"this is the worst 1-in-20-day loss I'd expect\" threshold, did reality actually "
+        "breach it about 1 time in 20, as it should? Spoiler: the answers aren't flattering to "
+        "the fancier models, and that's reported honestly -- see README for full methodology."
     )
 
     calib_years = st.slider("Calibration window (years)", 2, 10, 5)
