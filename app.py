@@ -97,7 +97,28 @@ def cached_backtest(ticker, years, calib_years, test_years, step_years):
 # ---------------------------------------------------------------------------
 
 st.sidebar.title("Configuration")
-ticker = st.sidebar.text_input("Ticker", value="AAPL").strip().upper()
+
+# Curated list of well-known, liquid tickers spanning sectors + major index
+# ETFs -- click the dropdown and either pick one or type to search/filter it
+# (Streamlit's selectbox supports type-ahead filtering natively). "Other"
+# reveals a free-text box for any ticker not in this list, so the dropdown
+# never actually limits what you can analyze, it just removes typing for
+# the common case.
+POPULAR_TICKERS = [
+    "AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA", "NFLX", "AMD", "INTC",
+    "JPM", "BAC", "GS", "V", "MA",
+    "JNJ", "PFE", "UNH",
+    "WMT", "KO", "PG", "MCD", "NKE", "DIS",
+    "XOM", "CVX", "BA",
+    "SPY", "QQQ", "DIA", "IWM", "VTI",
+    "Other (type your own)",
+]
+ticker_choice = st.sidebar.selectbox("Ticker", options=POPULAR_TICKERS, index=0)
+if ticker_choice == "Other (type your own)":
+    ticker = st.sidebar.text_input("Enter ticker symbol", value="").strip().upper()
+else:
+    ticker = ticker_choice
+
 history_years = st.sidebar.slider("Years of history", min_value=2, max_value=30, value=10)
 
 st.sidebar.markdown("---")
