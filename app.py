@@ -32,6 +32,10 @@ import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
 
+from analysis.plot_style import (new_dark_fig, apply_dark_style, COLOR_ACTUAL, COLOR_GBM,
+                                  COLOR_HESTON, COLOR_DOUBLE_HESTON, COLOR_BLACK_SCHOLES,
+                                  TEXT_SECONDARY)
+
 from data.loader import get_price_history, compute_log_returns, get_risk_free_rate, get_dividend_yield
 from data.realtime import get_live_quote
 from models.gbm import simulate_gbm_paths, estimate_gbm_params
@@ -234,21 +238,22 @@ with tab_results:
                         f"the others didn't.")
 
         st.markdown("#### The picture")
-        fig, ax = plt.subplots(figsize=(11, 4.5))
-        ax.plot(results_df["test_start_date"], results_df["realized_vol"], "k-o",
+        fig, ax = new_dark_fig(figsize=(11, 4.5))
+        ax.plot(results_df["test_start_date"], results_df["realized_vol"], "-o", color=COLOR_ACTUAL,
                 label="What actually happened", lw=2.5, ms=5)
-        ax.plot(results_df["test_start_date"], results_df["gbm_forecast_vol"], "b--s",
-                label="GBM predicted", alpha=0.8)
-        ax.plot(results_df["test_start_date"], results_df["heston_forecast_vol"], "r--^",
-                label="Heston predicted", alpha=0.8)
+        ax.plot(results_df["test_start_date"], results_df["gbm_forecast_vol"], "--s", color=COLOR_GBM,
+                label="GBM predicted", alpha=0.9)
+        ax.plot(results_df["test_start_date"], results_df["heston_forecast_vol"], "--^", color=COLOR_HESTON,
+                label="Heston predicted", alpha=0.9)
         if "dh_forecast_vol" in results_df.columns:
-            ax.plot(results_df["test_start_date"], results_df["dh_forecast_vol"], "g--d",
-                    label="Double Heston predicted", alpha=0.8)
+            ax.plot(results_df["test_start_date"], results_df["dh_forecast_vol"], "--d", color=COLOR_DOUBLE_HESTON,
+                    label="Double Heston predicted", alpha=0.9)
         ax.set_ylabel("Annualized volatility")
         ax.set_title(f"{ticker}: what each model predicted vs. what actually happened, year by year")
         ax.legend()
         fig.autofmt_xdate()
         st.pyplot(fig)
+        plt.close(fig)
         plt.close(fig)
 
         st.info("Want the full numbers behind this (RMSE tables, VaR breach rates, "
@@ -286,8 +291,8 @@ with tab_live:
                    f"Dividend yield: {div_yield:.3%}")
 
     st.subheader(f"Historical Price ({history_years}y)")
-    fig, ax = plt.subplots(figsize=(12, 4))
-    ax.plot(prices.index, prices["Close"], lw=1)
+    fig, ax = new_dark_fig(figsize=(12, 4))
+    ax.plot(prices.index, prices["Close"], lw=1.3, color=COLOR_ACTUAL)
     ax.set_ylabel("Close price")
     ax.set_title(f"{ticker} daily close")
     st.pyplot(fig)
@@ -386,10 +391,10 @@ with tab_calib:
                                           double["kappa2"], double["theta2"], double["xi2"],
                                           moments["lags_years"])
 
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(lags_days, moments["acf_emp"], "k.", label="Empirical ACF (realized variance)", ms=4)
-    ax.plot(lags_days, single_acf_model, "b-", label="Single Heston fit", lw=1.5)
-    ax.plot(lags_days, double_acf_model, "r--", label="Double Heston fit", lw=1.5)
+    fig, ax = new_dark_fig(figsize=(10, 5))
+    ax.plot(lags_days, moments["acf_emp"], ".", color=TEXT_SECONDARY, label="Empirical ACF (realized variance)", ms=5)
+    ax.plot(lags_days, single_acf_model, "-", color=COLOR_HESTON, label="Single Heston fit", lw=1.8)
+    ax.plot(lags_days, double_acf_model, "--", color=COLOR_DOUBLE_HESTON, label="Double Heston fit", lw=1.8)
     ax.set_xlabel("Lag (trading days)")
     ax.set_ylabel("Autocorrelation")
     ax.set_title(f"{ticker}: realized-variance ACF decay vs model fit")
@@ -433,12 +438,12 @@ with tab_backtest:
         }))
 
         st.subheader("Volatility Forecast: Realized vs Model, Over Time")
-        fig, ax = plt.subplots(figsize=(12, 5))
-        ax.plot(results_df["test_start_date"], results_df["realized_vol"], "k-o", label="Realized (actual)", lw=2)
-        ax.plot(results_df["test_start_date"], results_df["gbm_forecast_vol"], "b--s", label="GBM forecast", alpha=0.8)
-        ax.plot(results_df["test_start_date"], results_df["heston_forecast_vol"], "r--^", label="Heston forecast", alpha=0.8)
+        fig, ax = new_dark_fig(figsize=(12, 5))
+        ax.plot(results_df["test_start_date"], results_df["realized_vol"], "-o", color=COLOR_ACTUAL, label="Realized (actual)", lw=2)
+        ax.plot(results_df["test_start_date"], results_df["gbm_forecast_vol"], "--s", color=COLOR_GBM, label="GBM forecast", alpha=0.9)
+        ax.plot(results_df["test_start_date"], results_df["heston_forecast_vol"], "--^", color=COLOR_HESTON, label="Heston forecast", alpha=0.9)
         if "dh_forecast_vol" in results_df.columns:
-            ax.plot(results_df["test_start_date"], results_df["dh_forecast_vol"], "g--d", label="Double Heston forecast", alpha=0.8)
+            ax.plot(results_df["test_start_date"], results_df["dh_forecast_vol"], "--d", color=COLOR_DOUBLE_HESTON, label="Double Heston forecast", alpha=0.9)
         ax.set_ylabel("Annualized volatility")
         ax.set_title(f"{ticker}: walk-forward out-of-sample volatility forecast")
         ax.legend()
@@ -448,13 +453,15 @@ with tab_backtest:
 
         col1, col2 = st.columns(2)
         with col1:
-            fig, ax = plt.subplots(figsize=(7, 5))
+            fig, ax = new_dark_fig(figsize=(7, 5))
             plot_rmse_bar_chart(results_df, kupiec, ax=ax)
+            apply_dark_style(fig, ax)
             st.pyplot(fig)
             plt.close(fig)
         with col2:
-            fig, ax = plt.subplots(figsize=(7, 5))
+            fig, ax = new_dark_fig(figsize=(7, 5))
             plot_var_breach_comparison(results_df, kupiec, ax=ax)
+            apply_dark_style(fig, ax)
             st.pyplot(fig)
             plt.close(fig)
     else:
@@ -512,10 +519,10 @@ with tab_pricing:
         ivs_heston.append(implied_volatility(p_h, S0, K_i, T, r_rate, div_yield, "call"))
         ivs_dh.append(implied_volatility(p_dh, S0, K_i, T, r_rate, div_yield, "call"))
 
-    fig, ax = plt.subplots(figsize=(9, 5))
-    ax.plot(strikes, np.array(ivs_heston) * 100, "r-o", ms=3, label="Heston-implied")
-    ax.plot(strikes, np.array(ivs_dh) * 100, "g--s", ms=3, label="Double Heston-implied")
-    ax.axhline(bs_sigma * 100, color="b", ls=":", label="Black-Scholes (flat)")
+    fig, ax = new_dark_fig(figsize=(9, 5))
+    ax.plot(strikes, np.array(ivs_heston) * 100, "-o", color=COLOR_HESTON, ms=4, label="Heston-implied")
+    ax.plot(strikes, np.array(ivs_dh) * 100, "--s", color=COLOR_DOUBLE_HESTON, ms=4, label="Double Heston-implied")
+    ax.axhline(bs_sigma * 100, color=COLOR_BLACK_SCHOLES, ls=":", lw=2, label="Black-Scholes (flat)")
     ax.set_xlabel("Strike")
     ax.set_ylabel("Implied volatility (%)")
     ax.set_title(f"Model-implied smile, T={T_days}d (calibrated params, illustrative)")

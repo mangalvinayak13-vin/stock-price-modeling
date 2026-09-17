@@ -23,7 +23,8 @@ separately.
 
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
+
+from analysis.plot_style import new_dark_fig, COLOR_CALM, COLOR_TURBULENT, STATUS_GOOD, STATUS_CRITICAL, TEXT_SECONDARY
 
 
 def summary_table(results_df, kupiec_summary, include_double_heston=True):
@@ -91,12 +92,12 @@ def plot_rmse_bar_chart(results_df, kupiec_summary, include_double_heston=True, 
     table = summary_table(results_df, kupiec_summary, include_double_heston)
 
     if ax is None:
-        fig, ax = plt.subplots(figsize=(8, 5))
+        fig, ax = new_dark_fig(figsize=(8, 5))
 
     x = np.arange(len(table))
     width = 0.35
-    ax.bar(x - width / 2, table["vol_RMSE_calm"], width, label="Calm regime", color="steelblue")
-    ax.bar(x + width / 2, table["vol_RMSE_turbulent"], width, label="Turbulent regime", color="firebrick")
+    ax.bar(x - width / 2, table["vol_RMSE_calm"], width, label="Calm regime", color=COLOR_CALM)
+    ax.bar(x + width / 2, table["vol_RMSE_turbulent"], width, label="Turbulent regime", color=COLOR_TURBULENT)
 
     ax.set_xticks(x)
     ax.set_xticklabels(table["model"])
@@ -112,16 +113,24 @@ def plot_var_breach_comparison(results_df, kupiec_summary, include_double_heston
     table = summary_table(results_df, kupiec_summary, include_double_heston)
 
     if ax is None:
-        fig, ax = plt.subplots(figsize=(7, 5))
+        fig, ax = new_dark_fig(figsize=(7, 5))
 
     x = np.arange(len(table))
-    colors = ["crimson" if rej else "seagreen" for rej in table["kupiec_rejected"]]
-    ax.bar(x, table["VaR_breach_rate"] * 100, color=colors)
-    ax.axhline(table["VaR_target_rate"].iloc[0] * 100, color="black", ls="--",
+    # Pass/fail is a STATUS, not a series identity -- uses the reserved
+    # status palette (never a categorical color), and per the "status
+    # color never carries meaning alone" rule, each bar also gets an
+    # explicit REJECTED/PASS text label, not just its color.
+    colors = [STATUS_CRITICAL if rej else STATUS_GOOD for rej in table["kupiec_rejected"]]
+    bars = ax.bar(x, table["VaR_breach_rate"] * 100, color=colors)
+    for bar, rejected in zip(bars, table["kupiec_rejected"]):
+        label = "REJECTED" if rejected else "PASS"
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.15, label,
+                ha="center", va="bottom", fontsize=8, color=TEXT_SECONDARY)
+    ax.axhline(table["VaR_target_rate"].iloc[0] * 100, color=TEXT_SECONDARY, ls="--", lw=1.5,
                label=f"Target rate ({table['VaR_target_rate'].iloc[0]*100:.0f}%)")
     ax.set_xticks(x)
     ax.set_xticklabels(table["model"])
     ax.set_ylabel("Observed VaR breach rate (%)")
-    ax.set_title("VaR backtest: observed breach rate vs target (red = Kupiec-rejected at 5%)")
+    ax.set_title("VaR backtest: observed breach rate vs target")
     ax.legend()
     return ax

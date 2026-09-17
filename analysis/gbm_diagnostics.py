@@ -8,20 +8,29 @@ report) is twofold:
   2. Visually motivate WHY the constant-sigma assumption of GBM /
      Black-Scholes is unrealistic -- this sets up the rest of the report
      (Heston, Double Heston) which relax exactly this assumption.
+
+COLOR CONVENTION (see analysis/plot_style.py): real/empirical data is
+always drawn in neutral ink; the GBM/Black-Scholes constant-volatility
+ASSUMPTION (the fitted Normal curve, the "constant sigma" reference line)
+is always drawn in COLOR_GBM -- the same blue used for GBM everywhere else
+in the app, so "this is what GBM assumes" reads as one consistent visual
+identity across every chart, not just this module.
 """
 
 import numpy as np
-import matplotlib.pyplot as plt
 from scipy import stats
+
+from analysis.plot_style import (new_dark_fig, apply_dark_style, TEXT_SECONDARY,
+                                  COLOR_ACTUAL, COLOR_GBM)
 
 
 def plot_simulated_paths(t, S, n_show=30, ax=None, title="Simulated GBM Paths"):
     """Plot a subset of simulated GBM sample paths against time."""
     if ax is None:
-        fig, ax = plt.subplots(figsize=(9, 5))
+        fig, ax = new_dark_fig(figsize=(9, 5))
     n_show = min(n_show, S.shape[0])
     for i in range(n_show):
-        ax.plot(t, S[i], lw=0.8, alpha=0.7)
+        ax.plot(t, S[i], lw=0.8, alpha=0.55, color=COLOR_GBM)
     ax.set_xlabel("Time (years)")
     ax.set_ylabel("Price")
     ax.set_title(title)
@@ -37,13 +46,13 @@ def plot_return_histogram(log_returns, ax=None, title="Log Returns vs Fitted Nor
     first hint that GBM understates the probability of large moves.
     """
     if ax is None:
-        fig, ax = plt.subplots(figsize=(9, 5))
+        fig, ax = new_dark_fig(figsize=(9, 5))
 
     mu_hat, std_hat = np.mean(log_returns), np.std(log_returns, ddof=1)
-    ax.hist(log_returns, bins=60, density=True, alpha=0.6, color="steelblue", label="Empirical")
+    ax.hist(log_returns, bins=60, density=True, alpha=0.75, color=TEXT_SECONDARY, label="Empirical")
 
     x = np.linspace(log_returns.min(), log_returns.max(), 400)
-    ax.plot(x, stats.norm.pdf(x, mu_hat, std_hat), "r-", lw=2, label="Fitted Normal")
+    ax.plot(x, stats.norm.pdf(x, mu_hat, std_hat), color=COLOR_GBM, lw=2.5, label="Fitted Normal (GBM assumption)")
 
     ax.set_xlabel("Daily log return")
     ax.set_ylabel("Density")
@@ -61,8 +70,19 @@ def plot_qq(log_returns, ax=None, title="QQ Plot vs Normal"):
     volatility models.
     """
     if ax is None:
-        fig, ax = plt.subplots(figsize=(6, 6))
+        fig, ax = new_dark_fig(figsize=(6, 6))
     stats.probplot(log_returns, dist="norm", plot=ax)
+    # scipy.stats.probplot draws its own default colors (blue dots, red
+    # line) directly onto the axes -- restyle them to match the app's
+    # palette after the fact, since probplot has no color parameters.
+    lines = ax.get_lines()
+    if len(lines) >= 1:
+        lines[0].set_markerfacecolor(TEXT_SECONDARY)
+        lines[0].set_markeredgecolor(TEXT_SECONDARY)
+        lines[0].set_markersize(4)
+    if len(lines) >= 2:
+        lines[1].set_color(COLOR_GBM)
+        lines[1].set_linewidth(2)
     ax.set_title(title)
     return ax
 
@@ -83,14 +103,14 @@ def plot_rolling_volatility(log_returns, window=21, trading_days_per_year=252, a
     returns.
     """
     if ax is None:
-        fig, ax = plt.subplots(figsize=(10, 5))
+        fig, ax = new_dark_fig(figsize=(10, 5))
 
     rolling_std = log_returns.rolling(window=window).std()
     rolling_vol = rolling_std * np.sqrt(trading_days_per_year)
 
-    ax.plot(rolling_vol.index, rolling_vol.values, color="darkorange", lw=1.2)
-    ax.axhline(log_returns.std() * np.sqrt(trading_days_per_year), color="gray",
-               ls="--", lw=1, label="Full-sample constant sigma")
+    ax.plot(rolling_vol.index, rolling_vol.values, color=COLOR_ACTUAL, lw=1.3, label="Realized volatility")
+    ax.axhline(log_returns.std() * np.sqrt(trading_days_per_year), color=COLOR_GBM,
+               ls="--", lw=1.5, label="GBM's constant-sigma assumption")
     ax.set_xlabel("Date")
     ax.set_ylabel("Annualized volatility")
     ax.set_title(title)
@@ -103,10 +123,11 @@ def gbm_diagnostic_panel(t, S, log_returns, window=21):
     Convenience function: produces the full 2x2 diagnostic panel used in
     the report (simulated paths, return histogram, QQ-plot, rolling vol).
     """
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    fig, axes = new_dark_fig(figsize=(14, 10), nrows=2, ncols=2)
     plot_simulated_paths(t, S, ax=axes[0, 0])
     plot_return_histogram(log_returns, ax=axes[0, 1])
     plot_qq(log_returns, ax=axes[1, 0])
     plot_rolling_volatility(log_returns, window=window, ax=axes[1, 1])
+    apply_dark_style(fig, axes.flatten())
     fig.tight_layout()
     return fig
