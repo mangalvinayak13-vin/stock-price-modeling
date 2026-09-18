@@ -576,7 +576,8 @@ with tab_strategy:
         "what you'd pay or collect, where you break even, and the full payoff at expiry."
     )
 
-    pricer_choice = st.radio("Pricing model", ["Black-Scholes", "Heston"], horizontal=True)
+    pricer_choice = st.radio("Pricing model", ["Black-Scholes", "Heston"], horizontal=True,
+                              key="strat_pricer")
     S0_strat = float(prices["Close"].iloc[-1])
     T_days_strat = st.slider("Days to expiry", 7, 365, 30, key="strat_T")
     T_strat = T_days_strat / 365.0
@@ -595,36 +596,42 @@ with tab_strategy:
     strategy_choice = st.selectbox("Strategy", [
         "Long Straddle", "Short Straddle", "Long Strangle", "Short Strangle",
         "Bull Call Spread", "Bear Put Spread", "Iron Condor",
-    ])
+    ], key="strat_strategy")
 
     legs = None
     if strategy_choice in ("Long Straddle", "Short Straddle"):
-        K = st.number_input("Strike", value=float(round(S0_strat)), step=1.0)
+        K = st.number_input("Strike", value=float(round(S0_strat)), step=1.0, key="strat_K_straddle")
         legs = straddle(K, long=(strategy_choice == "Long Straddle"))
     elif strategy_choice in ("Long Strangle", "Short Strangle"):
         c1, c2 = st.columns(2)
-        K_put = c1.number_input("Put strike", value=float(round(S0_strat * 0.95)), step=1.0)
-        K_call = c2.number_input("Call strike", value=float(round(S0_strat * 1.05)), step=1.0)
+        K_put = c1.number_input("Put strike", value=float(round(S0_strat * 0.95)), step=1.0,
+                                 key="strat_K_put_strangle")
+        K_call = c2.number_input("Call strike", value=float(round(S0_strat * 1.05)), step=1.0,
+                                  key="strat_K_call_strangle")
         try:
             legs = strangle(K_put, K_call, long=(strategy_choice == "Long Strangle"))
         except ValueError as e:
             st.error(str(e))
     elif strategy_choice == "Bull Call Spread":
         c1, c2 = st.columns(2)
-        K_long = c1.number_input("Long call strike", value=float(round(S0_strat * 0.97)), step=1.0)
-        K_short = c2.number_input("Short call strike", value=float(round(S0_strat * 1.05)), step=1.0)
+        K_long = c1.number_input("Long call strike", value=float(round(S0_strat * 0.97)), step=1.0,
+                                  key="strat_K_long_bull")
+        K_short = c2.number_input("Short call strike", value=float(round(S0_strat * 1.05)), step=1.0,
+                                   key="strat_K_short_bull")
         legs = vertical_spread(K_long, K_short, "call")
     elif strategy_choice == "Bear Put Spread":
         c1, c2 = st.columns(2)
-        K_long = c1.number_input("Long put strike", value=float(round(S0_strat * 1.03)), step=1.0)
-        K_short = c2.number_input("Short put strike", value=float(round(S0_strat * 0.95)), step=1.0)
+        K_long = c1.number_input("Long put strike", value=float(round(S0_strat * 1.03)), step=1.0,
+                                  key="strat_K_long_bear")
+        K_short = c2.number_input("Short put strike", value=float(round(S0_strat * 0.95)), step=1.0,
+                                   key="strat_K_short_bear")
         legs = vertical_spread(K_long, K_short, "put")
     else:  # Iron Condor
         c1, c2, c3, c4 = st.columns(4)
-        K_pl = c1.number_input("Put long", value=float(round(S0_strat * 0.85)), step=1.0)
-        K_ps = c2.number_input("Put short", value=float(round(S0_strat * 0.93)), step=1.0)
-        K_cs = c3.number_input("Call short", value=float(round(S0_strat * 1.07)), step=1.0)
-        K_cl = c4.number_input("Call long", value=float(round(S0_strat * 1.15)), step=1.0)
+        K_pl = c1.number_input("Put long", value=float(round(S0_strat * 0.85)), step=1.0, key="strat_K_pl")
+        K_ps = c2.number_input("Put short", value=float(round(S0_strat * 0.93)), step=1.0, key="strat_K_ps")
+        K_cs = c3.number_input("Call short", value=float(round(S0_strat * 1.07)), step=1.0, key="strat_K_cs")
+        K_cl = c4.number_input("Call long", value=float(round(S0_strat * 1.15)), step=1.0, key="strat_K_cl")
         try:
             legs = iron_condor(K_pl, K_ps, K_cs, K_cl)
         except ValueError as e:
@@ -690,8 +697,8 @@ with tab_scanner:
         "returns can't see as it means the market is mispricing the contract. Treat this as a "
         "diagnostic, not a trade signal -- see trading/scanner.py for the full reasoning."
     )
-    max_expiries = st.slider("Number of expiries to scan", 1, 10, 4)
-    if st.button("Fetch live chain and scan", type="primary"):
+    max_expiries = st.slider("Number of expiries to scan", 1, 10, 4, key="scan_max_expiries")
+    if st.button("Fetch live chain and scan", type="primary", key="scan_button"):
         try:
             with st.spinner("Fetching live chain and scanning against the Heston model..."):
                 spot, chain = cached_clean_chain(ticker, max_expiries)
@@ -768,12 +775,13 @@ with tab_vrp:
         )
 
     c1, c2, c3, c4 = st.columns(4)
-    vrp_years = c1.slider("Years of history", 6, 33, 33)
-    vrp_calib_years = c2.slider("Heston calibration window (years)", 2, 10, 5)
-    vrp_cost = c3.slider("Round-trip cost (vol points)", 0.0, 3.0, 1.0, step=0.25) / 100.0
-    vrp_threshold = c4.slider("VRP signal threshold (vol points)", -5.0, 10.0, 0.0, step=0.5) / 100.0
+    vrp_years = c1.slider("Years of history", 6, 33, 33, key="vrp_years")
+    vrp_calib_years = c2.slider("Heston calibration window (years)", 2, 10, 5, key="vrp_calib_years")
+    vrp_cost = c3.slider("Round-trip cost (vol points)", 0.0, 3.0, 1.0, step=0.25, key="vrp_cost") / 100.0
+    vrp_threshold = c4.slider("VRP signal threshold (vol points)", -5.0, 10.0, 0.0, step=0.5,
+                               key="vrp_threshold") / 100.0
 
-    if st.button("Run VRP backtest", type="primary"):
+    if st.button("Run VRP backtest", type="primary", key="vrp_button"):
         try:
             with st.spinner(f"Walking forward through {vrp_years} years of SPY/VIX, "
                              f"recalibrating Heston once per year (roughly {max(vrp_years, 6)//2}s)..."):
