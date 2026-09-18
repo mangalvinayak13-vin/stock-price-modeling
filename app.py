@@ -34,9 +34,10 @@ import matplotlib.pyplot as plt
 
 from analysis.plot_style import (new_dark_fig, apply_dark_style, COLOR_ACTUAL, COLOR_GBM,
                                   COLOR_HESTON, COLOR_DOUBLE_HESTON, COLOR_BLACK_SCHOLES,
-                                  TEXT_SECONDARY)
+                                  TEXT_SECONDARY, CAT)
 
-from data.loader import get_price_history, compute_log_returns, get_risk_free_rate, get_dividend_yield
+from data.loader import (get_price_history, compute_log_returns, get_risk_free_rate,
+                          get_dividend_yield, get_vix_history, get_option_chain, clean_option_chain)
 from data.realtime import get_live_quote
 from models.gbm import simulate_gbm_paths, estimate_gbm_params
 from models.black_scholes import bs_price
@@ -48,6 +49,11 @@ from calibration.heston_calibration import calibrate_heston_gmm, _model_acf
 from calibration.double_heston_calibration import calibrate_double_heston_gmm, _double_model_acf
 from analysis.backtest import run_walk_forward_backtest
 from analysis.model_comparison import summary_table, plot_rmse_bar_chart, plot_var_breach_comparison
+from trading.strategies import (straddle, strangle, vertical_spread, iron_condor, bs_pricer,
+                                 heston_pricer, bs_greeks_fn, heston_greeks_fn, strategy_summary,
+                                 strategy_greeks)
+from trading.scanner import scan_chain_vs_heston, top_mispricings
+from trading.vrp_backtest import run_vrp_backtest, buy_and_hold_summary
 
 
 st.set_page_config(page_title="Stock Price Modeling: GBM -> Heston -> Double Heston",
@@ -94,6 +100,29 @@ def cached_backtest(ticker, years, calib_years, test_years, step_years):
     log_returns = compute_log_returns(prices)
     return run_walk_forward_backtest(log_returns, calib_years=calib_years, test_years=test_years,
                                       step_years=step_years, seed=1)
+
+
+@st.cache_data(ttl=1800, show_spinner="Fetching and cleaning today's live option chain...")
+def cached_clean_chain(ticker, max_expiries):
+    raw = get_option_chain(ticker, max_expiries=max_expiries)
+    cleaned = clean_option_chain(raw, spot=raw["spot"], verbose=False)
+    return raw["spot"], cleaned
+
+
+@st.cache_data(ttl=3600, show_spinner="Walking forward through SPY/VIX, recalibrating Heston once per year of history...")
+def cached_vrp_backtest(years, calib_years, holding_days, cost_vol, threshold):
+    prices = get_price_history("SPY", years=years)["Close"]
+    vix = get_vix_history(years=years)
+    r = get_risk_free_rate()
+    return run_vrp_backtest(prices, vix, r=r, calib_years=calib_years, holding_days=holding_days,
+                             transaction_cost_vol=cost_vol, vrp_threshold=threshold,
+                             heston_n_multistarts=6, seed=1)
+
+
+@st.cache_data(ttl=3600)
+def cached_buy_hold_spy(years):
+    prices = get_price_history("SPY", years=years)["Close"]
+    return buy_and_hold_summary(prices)
 
 
 # ---------------------------------------------------------------------------
@@ -173,9 +202,11 @@ log_returns = compute_log_returns(prices)
 r_rate, div_yield = cached_risk_free_and_dividend(ticker)
 
 
-tab_results, tab_live, tab_gbm, tab_calib, tab_backtest, tab_pricing = st.tabs(
+(tab_results, tab_live, tab_gbm, tab_calib, tab_backtest, tab_pricing,
+ tab_strategy, tab_scanner, tab_vrp) = st.tabs(
     ["Results (Start Here)", "Live Price", "GBM Diagnostics", "Heston / Double Heston Calibration",
-     "Detailed Backtest (Technical)", "Theoretical Option Pricing"]
+     "Detailed Backtest (Technical)", "Theoretical Option Pricing",
+     "Options Strategy Builder", "Live Mispricing Scanner", "Volatility Risk Premium Backtest"]
 )
 
 
@@ -529,3 +560,272 @@ with tab_pricing:
     ax.legend()
     st.pyplot(fig)
     plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# Tab 6: Options strategy builder
+# ---------------------------------------------------------------------------
+
+with tab_strategy:
+    st.subheader("Options Strategy Builder")
+    st.caption(
+        "**In plain terms:** pick a strategy -- a straddle bets on a big move either way; a "
+        "vertical spread caps both your risk and reward; an iron condor collects premium if "
+        "the stock stays in a range -- and this tab prices every leg with either Black-Scholes "
+        "(one flat volatility) or this ticker's calibrated Heston model, then shows exactly "
+        "what you'd pay or collect, where you break even, and the full payoff at expiry."
+    )
+
+    pricer_choice = st.radio("Pricing model", ["Black-Scholes", "Heston"], horizontal=True)
+    S0_strat = float(prices["Close"].iloc[-1])
+    T_days_strat = st.slider("Days to expiry", 7, 365, 30, key="strat_T")
+    T_strat = T_days_strat / 365.0
+
+    if pricer_choice == "Black-Scholes":
+        sigma_strat = st.slider("Volatility (annualized)", 0.05, 1.5,
+                                 float(np.sqrt(single["theta"])), step=0.01, key="strat_sigma")
+        pricer = bs_pricer(S0_strat, r_rate, sigma_strat, div_yield)
+        greeks_fn = bs_greeks_fn(S0_strat, r_rate, sigma_strat, div_yield)
+    else:
+        pricer = heston_pricer(S0_strat, r_rate, div_yield, single["kappa"], single["theta"],
+                                single["xi"], single["rho"], single["v0"])
+        greeks_fn = heston_greeks_fn(S0_strat, r_rate, div_yield, single["kappa"], single["theta"],
+                                      single["xi"], single["rho"], single["v0"])
+
+    strategy_choice = st.selectbox("Strategy", [
+        "Long Straddle", "Short Straddle", "Long Strangle", "Short Strangle",
+        "Bull Call Spread", "Bear Put Spread", "Iron Condor",
+    ])
+
+    legs = None
+    if strategy_choice in ("Long Straddle", "Short Straddle"):
+        K = st.number_input("Strike", value=float(round(S0_strat)), step=1.0)
+        legs = straddle(K, long=(strategy_choice == "Long Straddle"))
+    elif strategy_choice in ("Long Strangle", "Short Strangle"):
+        c1, c2 = st.columns(2)
+        K_put = c1.number_input("Put strike", value=float(round(S0_strat * 0.95)), step=1.0)
+        K_call = c2.number_input("Call strike", value=float(round(S0_strat * 1.05)), step=1.0)
+        try:
+            legs = strangle(K_put, K_call, long=(strategy_choice == "Long Strangle"))
+        except ValueError as e:
+            st.error(str(e))
+    elif strategy_choice == "Bull Call Spread":
+        c1, c2 = st.columns(2)
+        K_long = c1.number_input("Long call strike", value=float(round(S0_strat * 0.97)), step=1.0)
+        K_short = c2.number_input("Short call strike", value=float(round(S0_strat * 1.05)), step=1.0)
+        legs = vertical_spread(K_long, K_short, "call")
+    elif strategy_choice == "Bear Put Spread":
+        c1, c2 = st.columns(2)
+        K_long = c1.number_input("Long put strike", value=float(round(S0_strat * 1.03)), step=1.0)
+        K_short = c2.number_input("Short put strike", value=float(round(S0_strat * 0.95)), step=1.0)
+        legs = vertical_spread(K_long, K_short, "put")
+    else:  # Iron Condor
+        c1, c2, c3, c4 = st.columns(4)
+        K_pl = c1.number_input("Put long", value=float(round(S0_strat * 0.85)), step=1.0)
+        K_ps = c2.number_input("Put short", value=float(round(S0_strat * 0.93)), step=1.0)
+        K_cs = c3.number_input("Call short", value=float(round(S0_strat * 1.07)), step=1.0)
+        K_cl = c4.number_input("Call long", value=float(round(S0_strat * 1.15)), step=1.0)
+        try:
+            legs = iron_condor(K_pl, K_ps, K_cs, K_cl)
+        except ValueError as e:
+            st.error(str(e))
+
+    if legs is not None:
+        try:
+            summary = strategy_summary(legs, T_strat, pricer, S0=S0_strat)
+            greeks = strategy_greeks(legs, T_strat, greeks_fn)
+        except Exception as e:
+            st.error(f"Could not price this strategy: {e}")
+            summary = None
+
+        if summary is not None:
+            col1, col2, col3 = st.columns(3)
+            if summary["is_credit"]:
+                col1.metric("Net credit received", f"${-summary['entry_cost']:.2f}/share")
+            else:
+                col1.metric("Net debit paid", f"${summary['entry_cost']:.2f}/share")
+            col2.metric("Breakeven(s)", ", ".join(f"${b:.2f}" for b in summary["breakevens"]) or "none in range")
+            max_p = "Unlimited*" if summary["profit_uncapped"] else f"${summary['max_profit']:.2f}"
+            max_l = "Unlimited*" if summary["loss_uncapped"] else f"${summary['max_loss']:.2f}"
+            col3.metric("Max profit / Max loss", f"{max_p} / {max_l}")
+            if summary["profit_uncapped"] or summary["loss_uncapped"]:
+                st.caption("*Still trending away from zero at the edge of the scanned price range "
+                           "(+/-50% of spot) -- the true max is unbounded.")
+
+            gcol1, gcol2, gcol3, gcol4 = st.columns(4)
+            gcol1.metric("Delta", f"{greeks['delta']:.3f}")
+            gcol2.metric("Gamma", f"{greeks['gamma']:.4f}")
+            gcol3.metric("Vega", f"{greeks['vega']:.3f}")
+            gcol4.metric("Theta/day", f"{greeks['theta_daily']:.3f}")
+
+            fig, ax = new_dark_fig(figsize=(10, 5))
+            ax.plot(summary["S_grid"], summary["payoff"], color=COLOR_ACTUAL, lw=2)
+            ax.axhline(0, color=TEXT_SECONDARY, lw=1, ls="--")
+            ax.axvline(S0_strat, color=COLOR_HESTON, lw=1, ls=":", label=f"Current price ${S0_strat:.2f}")
+            for b in summary["breakevens"]:
+                ax.axvline(b, color=COLOR_GBM, lw=1, ls=":", alpha=0.7)
+            ax.set_xlabel("Underlying price at expiry")
+            ax.set_ylabel("P&L per share ($)")
+            ax.set_title(f"{strategy_choice}: payoff at expiry ({pricer_choice} pricing)")
+            ax.legend()
+            st.pyplot(fig)
+            plt.close(fig)
+
+            st.caption("P&L is per share -- multiply by 100 for the standard "
+                       "one-contract-per-100-shares convention on real US-listed options. "
+                       "Not adjusted for commissions.")
+
+
+# ---------------------------------------------------------------------------
+# Tab 7: Live mispricing scanner
+# ---------------------------------------------------------------------------
+
+with tab_scanner:
+    st.subheader("Live Mispricing Scanner")
+    st.caption(
+        "**What this compares:** today's REAL option chain (market prices) against this "
+        "ticker's Heston model, calibrated PURELY from historical returns -- not fit to this "
+        "chain at all (see README's methodology note). A big gap does NOT mean free money: it "
+        "just as easily means the options market knows something about the future that trailing "
+        "returns can't see as it means the market is mispricing the contract. Treat this as a "
+        "diagnostic, not a trade signal -- see trading/scanner.py for the full reasoning."
+    )
+    max_expiries = st.slider("Number of expiries to scan", 1, 10, 4)
+    if st.button("Fetch live chain and scan", type="primary"):
+        try:
+            with st.spinner("Fetching live chain and scanning against the Heston model..."):
+                spot, chain = cached_clean_chain(ticker, max_expiries)
+                scan = scan_chain_vs_heston(chain, spot, r_rate, div_yield, single)
+            st.session_state["scan_result"] = (spot, scan)
+        except Exception as e:
+            st.error(f"Could not fetch/scan the live chain for '{ticker}': {e}")
+
+    if "scan_result" in st.session_state:
+        spot, scan = st.session_state["scan_result"]
+        if scan.empty:
+            st.warning("No liquid (bid/ask-quoted) contracts survived cleaning for this "
+                       "ticker/expiry range -- try a more liquid ticker or more expiries.")
+        else:
+            top = top_mispricings(scan, n=15, min_abs_z=1.0)
+            st.markdown(f"Spot: **${spot:.2f}** | {len(scan)} liquid contracts scanned | "
+                        f"{len(top)} flagged as statistical outliers (|z| >= 1) against that "
+                        f"day's own dispersion")
+            if len(top) > 0:
+                st.dataframe(top[["expiry", "strike", "option_type", "moneyness", "market_iv",
+                                   "model_iv", "iv_gap", "iv_gap_z", "rich_or_cheap"]].style.format({
+                    "strike": "{:.1f}", "moneyness": "{:.3f}", "market_iv": "{:.2%}",
+                    "model_iv": "{:.2%}", "iv_gap": "{:.2%}", "iv_gap_z": "{:.2f}",
+                }))
+            else:
+                st.info("No outlier contracts (|z| >= 1) today -- the market and the "
+                        "returns-only Heston model broadly agree on this chain.")
+
+            fig, ax = new_dark_fig(figsize=(10, 5))
+            calls = scan[scan["option_type"] == "call"]
+            ax.scatter(calls["strike"], calls["market_iv"] * 100, s=18, color=COLOR_ACTUAL,
+                       label="Market IV (calls)", alpha=0.8)
+            ax.scatter(calls["strike"], calls["model_iv"] * 100, s=18, color=COLOR_HESTON,
+                       label="Heston model IV (calls)", alpha=0.8)
+            ax.axvline(spot, color=TEXT_SECONDARY, ls=":", lw=1, label=f"Spot ${spot:.2f}")
+            ax.set_xlabel("Strike")
+            ax.set_ylabel("Implied volatility (%)")
+            ax.set_title(f"{ticker}: market vs. Heston-model implied vol, all scanned expiries")
+            ax.legend()
+            st.pyplot(fig)
+            plt.close(fig)
+    else:
+        st.info("Click 'Fetch live chain and scan' to pull today's real option chain "
+                "(a few seconds per expiry).")
+
+
+# ---------------------------------------------------------------------------
+# Tab 8: Volatility risk premium backtest (SPY, always -- see caption)
+# ---------------------------------------------------------------------------
+
+with tab_vrp:
+    st.subheader("Volatility Risk Premium Backtest: Selling SPY Straddles, 1993-Today")
+    st.caption(
+        "This section always uses SPY, regardless of the ticker chosen in the sidebar -- it "
+        "uses the CBOE VIX index, which is specific to SPX/SPY, as the market's implied-vol "
+        "input (see trading/vrp_backtest.py for why this is how the project gets a REAL, "
+        "decades-long options-market-based backtest without paid historical option-chain data)."
+    )
+    with st.container(border=True):
+        st.markdown(
+            "**In plain terms:** every month, this either sells an at-the-money 1-month SPY "
+            "straddle (collecting the VIX-implied premium, betting SPY stays roughly where it "
+            "is) or stays in cash, based on whether VIX is pricing in MORE volatility than this "
+            "project's own Heston model expects over that month. It's compared against blindly "
+            "selling every single month, and against simply buying and holding SPY."
+        )
+        st.markdown(
+            "**Important limitations (read before drawing conclusions):** this is an "
+            "AT-THE-MONEY, UNHEDGED, held-to-expiry straddle struck exactly at spot, priced "
+            "with a single flat VIX-implied vol -- not a real chain's discrete strikes or skew, "
+            "and not delta-hedged along the way. It approximates a benchmark-index-style options "
+            "overlay (the same methodology CBOE's own published PUT/BXM indices use), not a "
+            "claim about what a real brokerage fill would achieve."
+        )
+
+    c1, c2, c3, c4 = st.columns(4)
+    vrp_years = c1.slider("Years of history", 6, 33, 33)
+    vrp_calib_years = c2.slider("Heston calibration window (years)", 2, 10, 5)
+    vrp_cost = c3.slider("Round-trip cost (vol points)", 0.0, 3.0, 1.0, step=0.25) / 100.0
+    vrp_threshold = c4.slider("VRP signal threshold (vol points)", -5.0, 10.0, 0.0, step=0.5) / 100.0
+
+    if st.button("Run VRP backtest", type="primary"):
+        try:
+            with st.spinner(f"Walking forward through {vrp_years} years of SPY/VIX, "
+                             f"recalibrating Heston once per year (roughly {max(vrp_years, 6)//2}s)..."):
+                df_signal = cached_vrp_backtest(vrp_years, vrp_calib_years, 21, vrp_cost, vrp_threshold)
+                df_always = cached_vrp_backtest(vrp_years, vrp_calib_years, 21, vrp_cost, -999.0)
+                bh = cached_buy_hold_spy(vrp_years)
+            st.session_state["vrp_result"] = (df_signal, df_always, bh)
+        except ValueError as e:
+            st.error(str(e))
+
+    if "vrp_result" in st.session_state:
+        df_signal, df_always, bh = st.session_state["vrp_result"]
+        s_sig, s_alw = df_signal.attrs["summary"], df_always.attrs["summary"]
+
+        metrics_df = pd.DataFrame([
+            {"Strategy": "VRP-signal-filtered", "CAGR": s_sig["cagr"], "Ann. vol": s_sig["annualized_vol"],
+             "Sharpe": s_sig["sharpe"], "Max drawdown": s_sig["max_drawdown"],
+             "Win rate": s_sig["win_rate"], "Active months": f"{s_sig['n_active_periods']}/{s_sig['n_periods']}"},
+            {"Strategy": "Always sell", "CAGR": s_alw["cagr"], "Ann. vol": s_alw["annualized_vol"],
+             "Sharpe": s_alw["sharpe"], "Max drawdown": s_alw["max_drawdown"],
+             "Win rate": s_alw["win_rate"], "Active months": f"{s_alw['n_active_periods']}/{s_alw['n_periods']}"},
+            {"Strategy": "Buy & hold SPY", "CAGR": bh["cagr"], "Ann. vol": bh["annualized_vol"],
+             "Sharpe": bh["sharpe"], "Max drawdown": bh["max_drawdown"], "Win rate": np.nan,
+             "Active months": "-"},
+        ]).set_index("Strategy")
+        st.dataframe(metrics_df.style.format({
+            "CAGR": "{:.2%}", "Ann. vol": "{:.2%}", "Sharpe": "{:.2f}",
+            "Max drawdown": "{:.2%}", "Win rate": "{:.1%}",
+        }))
+
+        fig, ax = new_dark_fig(figsize=(11, 5))
+        ax.plot(df_signal["exit_date"], s_sig["equity_curve"], color=CAT[5], lw=2, label="VRP-signal-filtered")
+        ax.plot(df_always["exit_date"], s_alw["equity_curve"], color=CAT[4], lw=2, label="Always sell")
+        ax.plot(bh["equity_curve"].index, bh["equity_curve"].values, color=COLOR_ACTUAL, lw=1.5,
+                alpha=0.8, label="Buy & hold SPY")
+        ax.set_yscale("log")
+        ax.set_ylabel("Growth of $1 (log scale)")
+        ax.set_title(f"SPY short-straddle overlay vs. buy & hold, {vrp_years} years")
+        ax.legend()
+        fig.autofmt_xdate()
+        st.pyplot(fig)
+        plt.close(fig)
+
+        best_sharpe = max([("VRP-signal-filtered", s_sig["sharpe"]), ("Always sell", s_alw["sharpe"]),
+                            ("Buy & hold SPY", bh["sharpe"])], key=lambda x: x[1])[0]
+        st.markdown(
+            f"**Best risk-adjusted return (Sharpe) over this window: {best_sharpe}.** Selling "
+            "volatility has historically collected a real premium here -- VIX has priced in "
+            "more volatility than materialized, on average, for most of this history -- but it "
+            "comes with fat-tail risk a monthly Sharpe ratio doesn't fully capture (a single bad "
+            "month can erase many months of collected premium; see max drawdown above)."
+        )
+    else:
+        st.info("Click 'Run VRP backtest' to compute (roughly 5-20 seconds depending on the "
+                "years selected -- recalibrates Heston once per year of history).")
