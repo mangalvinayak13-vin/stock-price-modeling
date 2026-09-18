@@ -115,6 +115,47 @@ def compute_log_returns(price_df, price_col="Close"):
     return log_ret
 
 
+def get_vix_history(years=30, force_refresh=False):
+    """
+    Download `years` of daily CBOE VIX index close (ticker '^VIX'),
+    quoted directly in volatility POINTS (e.g. 18.5 means 18.5% annualized
+    implied vol -- divide by 100 before using as a sigma).
+
+    WHY THIS MATTERS FOR THIS PROJECT: unlike the live-only option chain
+    (see get_option_chain's docstring), Yahoo Finance DOES serve a genuine
+    daily HISTORY for the VIX index, back to 1990 -- and every single one
+    of those daily values was itself computed by the CBOE from that day's
+    REAL, contemporaneous SPX option chain. This is what makes
+    trading/vrp_backtest.py's 30+-year backtest possible without paid
+    historical-options data: VIX is real historical options-market
+    information, just pre-aggregated into one number per day instead of a
+    full per-strike chain. See trading/vrp_backtest.py's module docstring
+    for the full reasoning and its limitations.
+    """
+    cache_name = f"vix_{years}y.pkl"
+    if not force_refresh:
+        cached = _load_cache(cache_name, max_age_hours=24)
+        if cached is not None:
+            return cached
+
+    end = dt.date.today()
+    start = end - dt.timedelta(days=int(years * 365.25))
+
+    df = yf.download("^VIX", start=start, end=end, auto_adjust=True, progress=False)
+    if df is None or df.empty:
+        raise ValueError("No VIX data returned from yfinance ('^VIX'). Check your internet connection.")
+
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+
+    vix = df["Close"].dropna()
+    vix.name = "VIX"
+    vix.index.name = "Date"
+
+    _save_cache(cache_name, vix)
+    return vix
+
+
 # ---------------------------------------------------------------------------
 # 2. Option chain
 # ---------------------------------------------------------------------------
